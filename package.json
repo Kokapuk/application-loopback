@@ -1,0 +1,17 @@
+{
+  "name": "application-loopback",
+  "version": "1.0.0",
+  "license": "MIT",
+  "main": "build/Release/addon.node",
+  "gypfile": true,
+  "scripts": {
+    "configure": "node-gyp configure build",
+    "build": "node-gyp build",
+    "rebuild": "node-gyp clean && node-gyp rebuild",
+    "test": "node test",
+    "install": "node-gyp rebuild"
+  },
+  "dependencies": {
+    "node-addon-api": "8.5.0"
+  }
+}
