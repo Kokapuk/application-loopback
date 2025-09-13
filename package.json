@@ -1,5 +1,5 @@
 {
-  "name": "application-loopback",
+  "name": "@kokapuk/application-loopback",
   "version": "1.0.0",
   "license": "MIT",
   "main": "build/Release/addon.node",
@@ -9,7 +9,8 @@
     "build": "node-gyp build",
     "rebuild": "node-gyp clean && node-gyp rebuild",
     "test": "node test",
-    "install": "node-gyp rebuild"
+    "install": "node-gyp rebuild",
+    "pub": "yarn publish --access public"
   },
   "dependencies": {
     "node-addon-api": "8.5.0"
