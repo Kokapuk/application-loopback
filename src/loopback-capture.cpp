@@ -49,6 +49,19 @@ CLoopbackCapture::~CLoopbackCapture()
 	}
 }
 
+bool CLoopbackCapture::IsProcessRunning(DWORD processId)
+{
+	HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, processId);
+
+	if (hProcess != NULL)
+	{
+		CloseHandle(hProcess);
+		return true;
+	}
+
+	return false;
+}
+
 HRESULT CLoopbackCapture::ActivateAudioInterface(DWORD processId, bool includeProcessTree)
 {
 	return SetDeviceStateErrorIfFailed([&]() -> HRESULT
@@ -133,6 +146,11 @@ HRESULT CLoopbackCapture::ActivateCompleted(IActivateAudioInterfaceAsyncOperatio
 
 HRESULT CLoopbackCapture::StartCaptureAsync(DWORD processId, bool includeProcessTree, Napi::Env env, Napi::Function callback)
 {
+	if (!IsProcessRunning(processId))
+	{
+		return E_INVALIDARG;
+	}
+
 	RETURN_IF_FAILED(InitializeLoopbackCapture());
 	RETURN_IF_FAILED(ActivateAudioInterface(processId, includeProcessTree));
 
@@ -335,7 +353,7 @@ HRESULT CLoopbackCapture::OnAudioSampleRequested()
 		RETURN_IF_FAILED(m_AudioCaptureClient->GetBuffer(&Data, &FramesAvailable, &dwCaptureFlags, &u64DevicePosition, &u64QPCPosition));
 
 		// Write to stdout
-		if (m_DeviceState != DeviceState::Stopping/*  && !IsBufferSilent(Data, FramesAvailable, &m_CaptureFormat, -70) */)
+		if (m_DeviceState != DeviceState::Stopping /*  && !IsBufferSilent(Data, FramesAvailable, &m_CaptureFormat, -70) */)
 		{
 			std::vector<uint8_t> buffer(Data, Data + cbBytesToCapture);
 

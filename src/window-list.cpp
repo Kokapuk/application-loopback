@@ -19,12 +19,63 @@ std::string WideToUtf8(const std::wstring &wide)
     return result;
 }
 
-BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam)
+Icon HIconToBitmap(HICON hIcon)
 {
-    std::vector<AppInfo> *apps = reinterpret_cast<std::vector<AppInfo> *>(lParam);
+    Icon icon;
+    
+    ICONINFO iconInfo;
+    if (!GetIconInfo(hIcon, &iconInfo))
+    {
+        return icon;
+    }
+
+    BITMAP bmp;
+    GetObject(iconInfo.hbmColor, sizeof(BITMAP), &bmp);
+
+    icon.width = bmp.bmWidth;
+    icon.height = bmp.bmHeight;
+
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = bmp.bmWidth;
+    bmi.bmiHeader.biHeight = -bmp.bmHeight;
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    HDC hdc = GetDC(NULL);
+    std::vector<uint8_t> pixels(icon.width * icon.height * (bmi.bmiHeader.biBitCount / 8));
+
+    GetDIBits(hdc, iconInfo.hbmColor, 0, icon.height, pixels.data(), &bmi, DIB_RGB_COLORS);
+
+    icon.buffer = pixels;
+
+    ReleaseDC(NULL, hdc);
+    DeleteObject(iconInfo.hbmColor);
+    DeleteObject(iconInfo.hbmMask);
+
+    return icon;
+}
+
+Icon GetWindowClassIcon(HWND hWnd)
+{
+    HICON hIcon = (HICON)GetClassLongPtr(hWnd, GCLP_HICON);
+
+    if (!hIcon)
+    {
+        hIcon = (HICON)GetClassLongPtr(hWnd, GCLP_HICONSM);
+    }
+
+    Icon icon = HIconToBitmap(hIcon);
+    return icon;
+}
+
+BOOL CALLBACK EnumWindowsProc(HWND hWnd, LPARAM lParam)
+{
+    std::vector<Window> *windows = reinterpret_cast<std::vector<Window> *>(lParam);
 
     wchar_t windowTitle[256];
-    GetWindowTextW(hwnd, windowTitle, sizeof(windowTitle) / sizeof(wchar_t));
+    GetWindowTextW(hWnd, windowTitle, sizeof(windowTitle) / sizeof(wchar_t));
 
     if (wcslen(windowTitle) == 0)
     {
@@ -34,7 +85,7 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam)
     std::string windowTitleUtf8 = WideToUtf8(windowTitle);
 
     DWORD processId;
-    GetWindowThreadProcessId(hwnd, &processId);
+    GetWindowThreadProcessId(hWnd, &processId);
 
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId);
     if (hProcess == NULL)
@@ -54,17 +105,18 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam)
     size_t lastSlash = fullPath.find_last_of(L"\\");
     std::wstring fileName = (lastSlash != std::wstring::npos) ? fullPath.substr(lastSlash + 1) : fullPath;
     std::string fileNameUtf8 = WideToUtf8(fileName);
+    Icon icon = GetWindowClassIcon(hWnd);
+    bool isVisible = IsWindowVisible(hWnd);
 
-    bool isVisible = IsWindowVisible(hwnd);
+    Window window;
+    window.processId = processId;
+    window.processName = fileNameUtf8;
+    window.title = windowTitleUtf8;
+    window.hWnd = hWnd;
+    window.icon = icon;
+    window.isVisible = isVisible;
 
-    AppInfo app;
-    app.processId = processId;
-    app.processName = fileNameUtf8;
-    app.windowTitle = windowTitleUtf8;
-    app.windowHandle = hwnd;
-    app.isVisible = isVisible;
-
-    apps->push_back(app);
+    windows->push_back(window);
 
     CloseHandle(hProcess);
     return TRUE;
@@ -74,25 +126,44 @@ Napi::Value GetVisibleWindows(const Napi::CallbackInfo &info)
 {
     Napi::Env env = info.Env();
 
-    std::vector<AppInfo> apps;
-    EnumWindows(EnumWindowsProc, reinterpret_cast<LPARAM>(&apps));
+    std::vector<Window> windows;
+    EnumWindows(EnumWindowsProc, reinterpret_cast<LPARAM>(&windows));
 
-    std::vector<AppInfo> filteredApps;
-    for (const auto &app : apps)
+    std::vector<Window> filteredWindows;
+    for (const auto &window : windows)
     {
-        if (!app.windowTitle.empty() && app.isVisible)
+        if (!window.title.empty() && window.isVisible)
         {
-            filteredApps.push_back(app);
+            filteredWindows.push_back(window);
         }
     }
 
-    Napi::Array result = Napi::Array::New(env, filteredApps.size());
-    for (size_t i = 0; i < filteredApps.size(); i++)
+    Napi::Array result = Napi::Array::New(env, filteredWindows.size());
+    for (size_t i = 0; i < filteredWindows.size(); i++)
     {
         Napi::Object obj = Napi::Object::New(env);
-        obj.Set("processId", Napi::Number::New(env, filteredApps[i].processId));
-        obj.Set("processName", Napi::String::New(env, filteredApps[i].processName));
-        obj.Set("windowTitle", Napi::String::New(env, filteredApps[i].windowTitle));
+        obj.Set("processId", Napi::Number::New(env, filteredWindows[i].processId));
+        obj.Set("processName", Napi::String::New(env, filteredWindows[i].processName));
+        obj.Set("title", Napi::String::New(env, filteredWindows[i].title));
+
+        Icon* icon = &filteredWindows[i].icon;
+
+        if (!filteredWindows[i].icon.buffer.empty())
+        {
+            Napi::Object iconObj = Napi::Object::New(env);
+            iconObj.Set("width", Napi::Number::New(env, icon->width));
+            iconObj.Set("height", Napi::Number::New(env, icon->height));
+
+            Napi::Buffer<uint8_t> data = Napi::Buffer<uint8_t>::Copy(env, icon->buffer.data(), icon->buffer.size());
+            iconObj.Set("buffer", data);
+
+            obj.Set("icon", iconObj);
+        }
+        else
+        {
+            obj.Set("icon", env.Null());
+        }
+
         result[i] = obj;
     }
 

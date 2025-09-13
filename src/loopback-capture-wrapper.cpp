@@ -21,7 +21,17 @@ Napi::Value StartLoopbackCapture(const Napi::CallbackInfo &info)
 	DWORD processId = info[0].As<Napi::Number>().Uint32Value();
 	Napi::Function callback = info[1].As<Napi::Function>();
 
-	loopbackCapture.StartCaptureAsync(processId, true, env, callback);
+	HRESULT result = loopbackCapture.StartCaptureAsync(processId, true, env, callback);
+
+	if (result == E_INVALIDARG)
+	{
+		Napi::TypeError::New(env, "Process with that id does not exist").ThrowAsJavaScriptException();
+		return env.Undefined();
+	} else if (result != S_OK) {
+		Napi::TypeError::New(env, "Unknown error").ThrowAsJavaScriptException();
+		return env.Undefined();
+	}
+
 	hasActiveProcess = true;
 
 	return env.Undefined();

@@ -54,6 +54,8 @@ private:
     HRESULT InitializeLoopbackCapture();
     HRESULT OnAudioSampleRequested();
 
+    bool IsProcessRunning(DWORD processId);
+
     HRESULT ActivateAudioInterface(DWORD processId, bool includeProcessTree);
     HRESULT FinishCaptureAsync();
 
