@@ -144,7 +144,44 @@ HRESULT CLoopbackCapture::ActivateCompleted(IActivateAudioInterfaceAsyncOperatio
 	return S_OK;
 }
 
-HRESULT CLoopbackCapture::StartCaptureAsync(DWORD processId, bool includeProcessTree, Napi::Env env, Napi::Function callback)
+void CALLBACK CLoopbackCapture::OnProcessExit(PVOID lpParameter, BOOLEAN TimerOrWaitFired)
+{
+	ProcessWaitContext *ctx = static_cast<ProcessWaitContext *>(lpParameter);
+
+	ctx->self->StopCaptureAsync();
+
+	UnregisterWaitEx(ctx->hWaitObject, INVALID_HANDLE_VALUE);
+	CloseHandle(ctx->hProcess);
+	delete ctx;
+}
+
+void CLoopbackCapture::HandleProcessStop(DWORD processId)
+{
+	HANDLE hProcess = OpenProcess(SYNCHRONIZE, FALSE, processId);
+
+	if (!hProcess)
+	{
+		return;
+	}
+
+	ProcessWaitContext *ctx = new ProcessWaitContext();
+	ctx->self = this;
+	ctx->hProcess = hProcess;
+
+	if (!RegisterWaitForSingleObject(
+					&ctx->hWaitObject,
+					hProcess,
+					CLoopbackCapture::OnProcessExit,
+					ctx,
+					INFINITE,
+					WT_EXECUTEONLYONCE))
+	{
+		CloseHandle(hProcess);
+		delete ctx;
+	}
+}
+
+HRESULT CLoopbackCapture::StartCaptureAsync(DWORD processId, bool includeProcessTree, Napi::Env env, Napi::Function chunkCallback, Napi::Function finishCallback)
 {
 	if (!IsProcessRunning(processId))
 	{
@@ -156,14 +193,30 @@ HRESULT CLoopbackCapture::StartCaptureAsync(DWORD processId, bool includeProcess
 
 	if (m_DeviceState == DeviceState::Initialized)
 	{
-		tsfn_ = Napi::ThreadSafeFunction::New(
+
+		m_DeviceState = DeviceState::Starting;
+
+		chunkSafeCallback = Napi::ThreadSafeFunction::New(
 				env,
-				callback,
-				"AudioSampleCallback",
+				chunkCallback,
+				"ChunkCallback",
 				0, // max queue size 0 = no limit
 				1	 // initial thread count
 		);
-		m_DeviceState = DeviceState::Starting;
+
+		if (!finishCallback.IsEmpty())
+		{
+			finishSafeCallback = Napi::ThreadSafeFunction::New(
+					env,
+					finishCallback,
+					"FinishCallback",
+					0, // max queue size 0 = no limit
+					1	 // initial thread count
+			);
+		}
+
+		HandleProcessStop(processId);
+
 		return MFPutWorkItem2(MFASYNC_CALLBACK_QUEUE_MULTITHREADED, 0, &m_xStartCapture, nullptr);
 	}
 
@@ -250,6 +303,18 @@ HRESULT CLoopbackCapture::OnFinishCapture(IMFAsyncResult *pResult)
 	m_DeviceState = DeviceState::Stopped;
 
 	m_hCaptureStopped.SetEvent();
+
+	if (finishSafeCallback)
+	{
+		finishSafeCallback.BlockingCall([](Napi::Env env, Napi::Function jsCallback)
+																		{ jsCallback.Call({}); });
+		finishSafeCallback.Release();
+	}
+
+	if (onCaptureFinish)
+	{
+		onCaptureFinish();
+	}
 
 	return S_OK;
 }
@@ -357,10 +422,15 @@ HRESULT CLoopbackCapture::OnAudioSampleRequested()
 		{
 			std::vector<uint8_t> buffer(Data, Data + cbBytesToCapture);
 
-			tsfn_.BlockingCall([buffer](Napi::Env env, Napi::Function jsCallback)
-												 {
-                Napi::Buffer<uint8_t> nodeBuffer = Napi::Buffer<uint8_t>::Copy(env, buffer.data(), buffer.size());
-                jsCallback.Call({ nodeBuffer }); });
+			chunkSafeCallback.BlockingCall([buffer](Napi::Env env, Napi::Function jsCallback)
+																		 {
+				Napi::Buffer<uint8_t> nodeBuffer = Napi::Buffer<uint8_t>::Copy(env, buffer.data(), buffer.size());
+				jsCallback.Call({nodeBuffer}); });
+
+			if (m_DeviceState == DeviceState::Stopping || m_DeviceState == DeviceState::Stopped)
+			{
+				chunkSafeCallback.Release();
+			}
 		}
 
 		// Release buffer back

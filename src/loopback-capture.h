@@ -21,8 +21,10 @@ public:
     CLoopbackCapture() = default;
     ~CLoopbackCapture();
 
-    HRESULT StartCaptureAsync(DWORD processId, bool includeProcessTree, Napi::Env env, Napi::Function callback);
+    HRESULT StartCaptureAsync(DWORD processId, bool includeProcessTree, Napi::Env env, Napi::Function chunkCallback, Napi::Function finishCallback);
     HRESULT StopCaptureAsync();
+
+    std::function<void()> onCaptureFinish;
 
     METHODASYNCCALLBACK(CLoopbackCapture, StartCapture, OnStartCapture);
     METHODASYNCCALLBACK(CLoopbackCapture, StopCapture, OnStopCapture);
@@ -46,6 +48,13 @@ private:
         Stopped,
     };
 
+    struct ProcessWaitContext
+    {
+        CLoopbackCapture* self;
+        HANDLE hProcess;
+        HANDLE hWaitObject;
+    };
+
     HRESULT OnStartCapture(IMFAsyncResult *pResult);
     HRESULT OnStopCapture(IMFAsyncResult *pResult);
     HRESULT OnFinishCapture(IMFAsyncResult *pResult);
@@ -61,6 +70,9 @@ private:
 
     HRESULT SetDeviceStateErrorIfFailed(HRESULT hr);
 
+    static void CALLBACK OnProcessExit(PVOID lpParameter, BOOLEAN TimerOrWaitFired);
+    void HandleProcessStop(DWORD processId);
+
     wil::com_ptr_nothrow<IAudioClient> m_AudioClient;
     WAVEFORMATEX m_CaptureFormat{};
     UINT32 m_BufferFrames = 0;
@@ -74,7 +86,8 @@ private:
     DWORD m_cbHeaderSize = 0;
     DWORD m_cbDataSize = 0;
 
-    Napi::ThreadSafeFunction tsfn_;
+    Napi::ThreadSafeFunction chunkSafeCallback;
+    Napi::ThreadSafeFunction finishSafeCallback;
 
     // These two members are used to communicate between the main thread
     // and the ActivateCompleted callback.

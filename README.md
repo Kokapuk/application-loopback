@@ -17,7 +17,11 @@ if (!spotifyWindow) {
   throw new Error('Spotify is not running');
 }
 
-startLoopbackCapture(spotifyWindow.processId, (data) => console.log(data));
+startLoopbackCapture(
+  spotifyWindow.processId,
+  (data) => console.log(data),
+  () => console.log('finished')
+);
 
 setTimeout(() => stopLoopbackCapture(), 3000);
 ```
@@ -60,7 +64,7 @@ nativeImage
 Starts loopback capture for window found by specified process id.
 
 ```ts
-startLoopbackCapture(processId: number, callback: (chunk: Uint8Array) => void): void;
+startLoopbackCapture(processId: number, chunkCallback: (chunk: Uint8Array) => void, finishCallback: () => void): void;
 ```
 
 > [!NOTE]
@@ -76,6 +80,7 @@ Stops active loopback capture if one exists
 ```ts
 stopLoopbackCapture(): void;
 ```
+
 ## Remark
 
 Addon is based on [original package](https://github.com/WerdoxDev/application-loopback) by WerdoxDev. Original package was really useful at least because most of C++ code i copied from it. But it had some encoding problems and i also wanted to include icons for windows, so i also decided to turn it into a native addon for better performance and developer experience. Maybe later i will also add typescript bindings for it, dunno for sure 🫤
