@@ -4,6 +4,10 @@
   "license": "MIT",
   "main": "build/Release/addon.node",
   "gypfile": true,
+  "files": [
+    "src",
+    "binding.gyp"
+  ],
   "scripts": {
     "configure": "node-gyp configure build",
     "build": "node-gyp build",

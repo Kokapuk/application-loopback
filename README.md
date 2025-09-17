@@ -64,7 +64,7 @@ nativeImage
 Starts loopback capture for window found by specified process id.
 
 ```ts
-startLoopbackCapture(processId: number, chunkCallback: (chunk: Uint8Array) => void, finishCallback: () => void): void;
+startLoopbackCapture(processId: number, chunkCallback: (chunk: Uint8Array) => void, finishCallback?: () => void): void;
 ```
 
 > [!NOTE]

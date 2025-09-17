@@ -417,7 +417,6 @@ HRESULT CLoopbackCapture::OnAudioSampleRequested()
 		// Get sample buffer
 		RETURN_IF_FAILED(m_AudioCaptureClient->GetBuffer(&Data, &FramesAvailable, &dwCaptureFlags, &u64DevicePosition, &u64QPCPosition));
 
-		// Write to stdout
 		if (m_DeviceState != DeviceState::Stopping /*  && !IsBufferSilent(Data, FramesAvailable, &m_CaptureFormat, -70) */)
 		{
 			std::vector<uint8_t> buffer(Data, Data + cbBytesToCapture);
