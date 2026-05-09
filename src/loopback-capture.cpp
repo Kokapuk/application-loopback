@@ -144,42 +144,60 @@ HRESULT CLoopbackCapture::ActivateCompleted(IActivateAudioInterfaceAsyncOperatio
 	return S_OK;
 }
 
-void CALLBACK CLoopbackCapture::OnProcessExit(PVOID lpParameter, BOOLEAN TimerOrWaitFired)
+void CALLBACK CLoopbackCapture::OnProcessStop(PVOID lpParameter, BOOLEAN)
 {
-	ProcessWaitContext *ctx = static_cast<ProcessWaitContext *>(lpParameter);
+    ProcessWaitContext* ctx = static_cast<ProcessWaitContext*>(lpParameter);
+    ctx->self->m_hWaitObject = nullptr;
+    ctx->self->m_pWaitCtx = nullptr;
+    ctx->self->StopCaptureAsync();
 
-	ctx->self->StopCaptureAsync();
-
-	UnregisterWaitEx(ctx->hWaitObject, INVALID_HANDLE_VALUE);
-	CloseHandle(ctx->hProcess);
-	delete ctx;
+    UnregisterWaitEx(ctx->hWaitObject, INVALID_HANDLE_VALUE);
+    CloseHandle(ctx->hProcess);
+    delete ctx;
 }
 
-void CLoopbackCapture::HandleProcessStop(DWORD processId)
+void CLoopbackCapture::RegisterProcessStopCallback(DWORD processId)
 {
-	HANDLE hProcess = OpenProcess(SYNCHRONIZE, FALSE, processId);
+	  HANDLE hProcess = OpenProcess(SYNCHRONIZE, FALSE, processId);
+    if (!hProcess) return;
 
-	if (!hProcess)
-	{
-		return;
-	}
+    m_pWaitCtx = new ProcessWaitContext();
+    m_pWaitCtx->self = this;
+    m_pWaitCtx->hProcess = hProcess;
 
-	ProcessWaitContext *ctx = new ProcessWaitContext();
-	ctx->self = this;
-	ctx->hProcess = hProcess;
-
-	if (!RegisterWaitForSingleObject(
-					&ctx->hWaitObject,
-					hProcess,
-					CLoopbackCapture::OnProcessExit,
-					ctx,
-					INFINITE,
-					WT_EXECUTEONLYONCE))
-	{
-		CloseHandle(hProcess);
-		delete ctx;
-	}
+    if (!RegisterWaitForSingleObject(
+            &m_pWaitCtx->hWaitObject,
+            hProcess,
+            CLoopbackCapture::OnProcessStop,
+            m_pWaitCtx,
+            INFINITE,
+            WT_EXECUTEONLYONCE))
+    {
+        CloseHandle(hProcess);
+        delete m_pWaitCtx;
+        m_pWaitCtx = nullptr;
+    }
+    else
+    {
+        m_hWaitObject = m_pWaitCtx->hWaitObject;
+    }
 }
+
+void CLoopbackCapture::UnregisterProcessStopCallback()
+{
+    if (!m_hWaitObject) return;
+
+    UnregisterWaitEx(m_hWaitObject, INVALID_HANDLE_VALUE);
+    m_hWaitObject = nullptr;
+
+    if (m_pWaitCtx)
+    {
+        CloseHandle(m_pWaitCtx->hProcess);
+        delete m_pWaitCtx;
+        m_pWaitCtx = nullptr;
+    }
+}
+
 
 HRESULT CLoopbackCapture::StartCaptureAsync(DWORD processId, bool includeProcessTree, Napi::Env env, Napi::Function chunkCallback, Napi::Function finishCallback)
 {
@@ -215,7 +233,7 @@ HRESULT CLoopbackCapture::StartCaptureAsync(DWORD processId, bool includeProcess
 			);
 		}
 
-		HandleProcessStop(processId);
+		RegisterProcessStopCallback(processId);
 
 		return MFPutWorkItem2(MFASYNC_CALLBACK_QUEUE_MULTITHREADED, 0, &m_xStartCapture, nullptr);
 	}
@@ -248,17 +266,16 @@ HRESULT CLoopbackCapture::OnStartCapture(IMFAsyncResult *pResult)
 //
 HRESULT CLoopbackCapture::StopCaptureAsync()
 {
-	RETURN_HR_IF(E_NOT_VALID_STATE, (m_DeviceState != DeviceState::Capturing) &&
-																			(m_DeviceState != DeviceState::Error));
+    RETURN_HR_IF(E_NOT_VALID_STATE, (m_DeviceState != DeviceState::Capturing) &&
+                                    (m_DeviceState != DeviceState::Error));
 
-	m_DeviceState = DeviceState::Stopping;
+    UnregisterProcessStopCallback();
 
-	RETURN_IF_FAILED(MFPutWorkItem2(MFASYNC_CALLBACK_QUEUE_MULTITHREADED, 0, &m_xStopCapture, nullptr));
+    m_DeviceState = DeviceState::Stopping;
+    RETURN_IF_FAILED(MFPutWorkItem2(MFASYNC_CALLBACK_QUEUE_MULTITHREADED, 0, &m_xStopCapture, nullptr));
+    m_hCaptureStopped.wait();
 
-	// Wait for capture to stop
-	m_hCaptureStopped.wait();
-
-	return S_OK;
+    return S_OK;
 }
 
 //

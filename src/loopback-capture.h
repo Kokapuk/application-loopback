@@ -70,8 +70,12 @@ private:
 
     HRESULT SetDeviceStateErrorIfFailed(HRESULT hr);
 
-    static void CALLBACK OnProcessExit(PVOID lpParameter, BOOLEAN TimerOrWaitFired);
-    void HandleProcessStop(DWORD processId);
+    static void CALLBACK OnProcessStop(PVOID lpParameter, BOOLEAN TimerOrWaitFired);
+    void RegisterProcessStopCallback(DWORD processId);
+    void UnregisterProcessStopCallback();
+
+    HANDLE m_hWaitObject = nullptr;
+    ProcessWaitContext* m_pWaitCtx = nullptr;
 
     wil::com_ptr_nothrow<IAudioClient> m_AudioClient;
     WAVEFORMATEX m_CaptureFormat{};
